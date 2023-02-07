@@ -1,0 +1,15 @@
+Adc1[0]= sensor 1
+Adc1[1]= sensor 3
+Adc1[2]= sensor 5
+Adc1[3]= sensor 7
+Adc1[4]= sensor 9
+Adc1[5]= sensor 11
+Adc1[6]=sensor 13
+
+Adc2[0]= sensor2
+Adc2[1]= sensor 4
+Adc2[2]= sensor 6
+Adc2[3]= sensor 8
+Adc2[4]= sensor 10
+Adc2[5]= sensor 12
+Adc2[6]=NO Sensor
