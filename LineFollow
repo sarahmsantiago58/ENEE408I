@@ -3,15 +3,26 @@
 #include <Adafruit_MPU6050.h>
 #include <Encoder.h>
 
+// IMU (rotation rate and acceleration)
+Adafruit_MPU6050 mpu;
 Adafruit_MCP3008 adc1;
 Adafruit_MCP3008 adc2;
 
-// IMU (rotation rate and acceleration)
-Adafruit_MPU6050 mpu;
+// Buzzer pin which we will use for indicating IMU initialization failure
+const unsigned int BUZZ = 26;
+const unsigned int BUZZ_CHANNEL = 0;
 
+// Need these pins to turn off light bar ADC chips
 const unsigned int ADC_1_CS = 2;
 const unsigned int ADC_2_CS = 17;
 
+// Battery voltage measurement constants
+const unsigned int VCC_SENSE = 27;
+const float ADC_COUNTS_TO_VOLTS = (2.4 + 1.0) / 1.0 * 3.3 / 4095.0;
+
+// Motor encoder pins
+const unsigned int M1_ENC_A = 39;
+const unsigned int M1_ENC_B = 38;
 const unsigned int M2_ENC_A = 37;
 const unsigned int M2_ENC_B = 36;
 
@@ -79,8 +90,6 @@ void configure_motor_pins() {
   ledcAttachPin(M2_IN_1, M2_IN_1_CHANNEL);
   ledcAttachPin(M2_IN_2, M2_IN_2_CHANNEL);
 }
-
-
 
 // Positive means forward, negative means backwards
 void set_motors_pwm(float left_pwm, float right_pwm) {
@@ -155,24 +164,14 @@ float signed_angle(float x0, float y0, float n0, float x1, float y1, float n1) {
 
 void setup() {
   Serial.begin(115200);
-
-  // Disalbe the lightbar ADC chips so they don't hold the SPI bus used by the IMU
+ pinMode(14, OUTPUT);
+ digitalWrite(14, LOW);
+delay(100);
+  // Disable the lightbar ADC chips so they don't hold the SPI bus used by the IMU
   pinMode(ADC_1_CS, OUTPUT);
   pinMode(ADC_2_CS, OUTPUT);
   digitalWrite(ADC_1_CS, HIGH);
   digitalWrite(ADC_2_CS, HIGH);
-  
-   // Stop the right motor by setting pin 14 low
-  // this pin floats high or is pulled
-  // high during the bootloader phase for some reason
-  pinMode(14, OUTPUT);
-  digitalWrite(14, LOW);
-  delay(100);
-
-  Serial.begin(115200);
-
-  adc1.begin(ADC_1_CS);  
-  adc2.begin(ADC_2_CS);  
 
   ledcAttachPin(BUZZ, BUZZ_CHANNEL);
 
@@ -180,30 +179,16 @@ void setup() {
 
   configure_motor_pins();
   configure_imu();
+  Serial.begin(115200);
 
-  Serial.println("Starting!");
+  adc1.begin(ADC_1_CS);  
+  adc2.begin(ADC_2_CS); 
+  Serial.println("Starting HERE!");
 }
 
+
 void loop() {
-   int adc1_buf[8];
-  int adc2_buf[8];
 
-  int t_start = micros();
-  for (int i = 0; i < 8; i++) {
-    adc1_buf[i] = adc1.readADC(i);
-    adc2_buf[i] = adc2.readADC(i);
-  }
-  int t_end = micros();
-
-  for (int i = 0; i < 8; i++) {
-    Serial.print(adc1_buf[i]); Serial.print("\t");
-    Serial.print(adc2_buf[i]); Serial.print("\t");
-  }
-
-  Serial.print(t_end - t_start);
-  Serial.println();
-
-  delay(100);
   // Create the encoder objects after the motor has
   // stopped, else some sort exception is triggered
   Encoder enc1(M1_ENC_A, M1_ENC_B);
@@ -233,8 +218,8 @@ void loop() {
   float ki_left = 20.0;
   float kd_left = 20.0;
   float kf_left = 10.0;
-  float target_pos_left  = acd1;
-  float last_pos_left = 0.0;
+  float target_pos_left  = 0.0;
+  float last_pos_left = 0.0;  
   float integral_error_pos_left = 0.0;
   float max_integral_error_pos_left = 1.0 * 8.0 / ki_left; // Max effect is the nominal battery voltage
 
@@ -243,7 +228,7 @@ void loop() {
   float kd_right = 20.0;
   float kf_right = 10.0;
   float last_pos_right = 0.0;
-  float target_pos_right = acd2;
+  float target_pos_right = 0.0; 
   float integral_error_pos_right = 0.0;
   float max_integral_error_pos_right = 1.0 * 8.0 / ki_right; // Max effect is the nominal battery voltage
 
@@ -255,16 +240,36 @@ void loop() {
   float ktheta = (2 * 3.14159) / (90.0 * 3.14159 / 180.0);
   est_imu_bias(bias_omega, 500);// Could be expanded for more quantities
 
-  // The real "loop()"
+  // THE REAL "loop()"
   // time starts from 0
   float start_t = (float)micros() / 1000000.0;
   float last_t = -target_period_ms / 1000.0; // Offset by expected looptime to avoid divide by zero
   while (true) {
+      int adc1_buf[8];
+    int adc2_buf[8]; 
+
+    int t_start = micros();
+    for (int i = 0; i < 8; i++) {
+      adc1_buf[i] = adc1.readADC(i);
+      adc2_buf[i] = adc2.readADC(i);
+    }
+    int t_end = micros();
+
+    for (int i = 0; i < 8; i++) {
+      Serial.print(adc1_buf[i]); Serial.print("\t");
+      Serial.print(adc2_buf[i]); Serial.print("\t");
+    }
+
+  Serial.print(t_end - t_start);
+  Serial.println();
+
+ // delay(100);
+
     // Get the time elapsed
     float t = ((float)micros()) / 1000000.0 - start_t;
     float dt = ((float)(t - last_t)); // Calculate time since last update
     // Serial.print("t "); Serial.print(t);
-    Serial.print(" dt "); Serial.print(dt * 1000.0);
+   // Serial.print(" dt "); Serial.print(dt * 1000.0);
     last_t = t;
 
     // Get the distances the wheels have traveled in meters
@@ -302,7 +307,7 @@ void loop() {
 
     float dx = (x - last_x) / dt;
     float dy = (y - last_y) / dt;
-    float target_v = sqrtf(dx * dx + dy * dy); // forward velocity
+    float target_v = sqrtf(dx * dx + dy * dy); // forward velocity CHANGE
 
     // Serial.print(" dx "); Serial.print(dx);
     // Serial.print(" dy "); Serial.print(dy);
@@ -312,7 +317,55 @@ void loop() {
     // using this method instead of atan2 allows easy smooth handling of angles outsides of -pi / pi at the cost of
     // a slow drift defined by numerical precision
     float target_omega = signed_angle(last_dx, last_dy, last_target_v, dx, dy, target_v) / dt;
-    target_theta = target_theta + target_omega * dt;
+
+    // for (int i = 0; i < 13; i++) {
+    //   if(adc1_buf[i]>200){ //its light
+        
+    //   }
+    // }
+    
+// WORKING HERE
+    int max_value;
+    int avg = 0;
+    // for(int i=6;i<9;i++){
+    //   avg += adc1_buf[i];
+    // }
+    // Serial.print("S7:"); Serial.print(adc1_buf[6]); Serial.print("\t");
+    // Serial.print("S8:"); Serial.print(adc1_buf[7]); Serial.print("\t");
+    if(adc1_buf[3]<650){//middle sensor 7 is over white line, go straight
+      target_omega = 0;
+      target_v= .1;
+      target_theta = target_theta + target_omega * dt;
+    }
+    else if(adc1_buf[3]>650 && adc2_buf[3]>600){ // middle is DARK, sens8 is dark, needs to turn right
+      target_v=0;
+      //Need to be more precise
+      // Serial.println("GOT HERE!");
+      target_omega = -.5; //turn right
+      target_theta = target_theta + target_omega * dt;
+    }
+    else if(adc1_buf[3]>650 && (adc2_buf[3]<600 || adc1_buf[4]<600)){ //if middle is dark, and 8 and 9 is light, turn left
+      target_v = 0;
+       //Serial.println("NOW HERE!");
+      target_omega = .5; //turn left
+      target_theta = target_theta + target_omega * dt;
+    }
+    else if(adc1_buf[3]>650 && (adc1_buf[0]<700 || adc2_buf[0]<700)) { //sensor 1 and 2 is over white, middle is dark
+      target_v = 0; //maybe make 0
+      target_omega = -.5; //turn right
+      target_theta = target_theta + target_omega * dt;
+    }
+    else if(adc1_buf[3]>650 && (adc1_buf[5]<600 || adc2_buf[4]<600)) { //middle dark, 10 or 11 light, turn left
+      target_v = 0; //maybe make 0
+      target_omega = .5; //turn left
+      target_theta = target_theta + target_omega * dt;
+    }
+    //if 7 is dark, keep straight, theta = 0
+    //if 7 is light, look at 8 and 6
+    //if 8 is light, turn right slightly
+    //else if 6 is light, turn left slightly
+    
+    //target_theta = target_theta + target_omega * dt; //CHANGE
 
     // Serial.print(" target_omega "); Serial.print(target_omega);
     // Serial.print(" t theta "); Serial.print(target_theta);
